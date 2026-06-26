@@ -13,7 +13,9 @@
 - XLSX 答疑表解析：从 OPC 容器中按单元格抽取内嵌图片并关联到对应问答行。
 - 本地向量检索：`BAAI/bge-small-zh-v1.5`（中文优化，CPU 可跑，无需联网鉴权）。
 - 多模态作答：Qwen-VL (DashScope)，后端可切换（改 `config.py` 即可换 GPT-4o/Claude）。
-- Web 界面 (Gradio)：文字提问 + 多图上传，展示回答、引用来源、检索到的示例图。
+- Web 界面：文字提问 + 多图上传，展示回答、引用来源、检索到的示例图。
+- 聊天输入框支持 **Ctrl+V 直接粘贴图片**（截图后直接粘贴提问）。
+- 可选**访问密码门禁**：设置 `ACCESS_PASSWORD` 后，网页需先输入密码才能使用。
 
 ## 目录结构
 ```
@@ -74,6 +76,15 @@ docker build \
 docker compose up -d            # 启动，监听 0.0.0.0:7860
 ```
 
+### 开启访问密码
+在 `.env` 里加一行（或在 `docker-compose.yml` 的 `environment` 下设置），然后重启：
+```bash
+echo 'ACCESS_PASSWORD=你的密码' >> .env
+docker compose restart
+```
+开启后首次访问会弹出密码框，输入正确密码后通过 HttpOnly cookie 记住 7 天；
+留空或不设置该变量则保持开放（向后兼容）。
+
 调试常用命令：
 ```bash
 docker logs -f annotation-assistant      # 跟随日志
@@ -87,6 +98,7 @@ docker compose up -d --build              # 改依赖/Dockerfile 后重建
 |------|--------|------|
 | `PDF_PATH` / `XLSX_PATH` | — | 源文档路径 |
 | `DASHSCOPE_API_KEY` | — | Qwen-VL API key（必填，作答用） |
+| `ACCESS_PASSWORD` | 空 | 访问密码。留空＝无需登录；设置后网页需输入该密码才能访问 |
 | `VL_MODEL` | `qwen-vl-max` | 视觉模型，可改 `qwen-vl-plus` 省钱 |
 | `EMBED_MODEL` | `BAAI/bge-small-zh-v1.5` | 本地检索嵌入模型 |
 | `TOP_K` | `6` | 检索条数 |

@@ -8,6 +8,17 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
+  <div class="gate" id="gate" hidden>
+    <div class="gate-card">
+      <div class="gate-logo">◆</div>
+      <h2>标注答疑助手</h2>
+      <p>请输入访问密码以继续</p>
+      <input type="password" id="gate-input" placeholder="访问密码" autocomplete="current-password" />
+      <button id="gate-btn">进入</button>
+      <div class="gate-err" id="gate-err"></div>
+    </div>
+  </div>
+
   <div class="app">
     <header class="topbar">
       <div class="brand">
@@ -45,7 +56,7 @@
             <input type="file" id="ask-files" accept="image/*" multiple hidden />
             <span>📎</span>
           </label>
-          <textarea id="ask-input" rows="1" placeholder="输入你的标注问题…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <textarea id="ask-input" rows="1" placeholder="输入你的标注问题…（Enter 发送，Shift+Enter 换行，可直接 Ctrl+V 粘贴图片）"></textarea>
           <button class="send" id="ask-send">发送</button>
         </div>
       </div>

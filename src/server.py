@@ -1,12 +1,14 @@
 """FastAPI backend + static frontend for the annotation Q&A assistant."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Form, HTTPException, UploadFile, File
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -21,6 +23,28 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="标注答疑助手")
 _retriever: Retriever | None = None
+
+AUTH_COOKIE = "aa_token"
+
+
+def _auth_required() -> bool:
+    return bool(config.ACCESS_PASSWORD)
+
+
+def _expected_token() -> str:
+    return hashlib.sha256(("aa::" + config.ACCESS_PASSWORD).encode()).hexdigest()
+
+
+def _is_authed(request: Request) -> bool:
+    if not _auth_required():
+        return True
+    return hmac.compare_digest(request.cookies.get(AUTH_COOKIE, ""), _expected_token())
+
+
+def require_auth(request: Request) -> None:
+    """Dependency that blocks unauthenticated access when a password is set."""
+    if not _is_authed(request):
+        raise HTTPException(status_code=401, detail="未授权，请先输入访问密码")
 
 
 def get_retriever() -> Retriever:
@@ -53,8 +77,32 @@ def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
 
 
+@app.get("/api/auth")
+def auth_status(request: Request):
+    return {"required": _auth_required(), "authed": _is_authed(request)}
+
+
+@app.post("/api/login")
+def login(response: Response, password: str = Form(...)):
+    if not _auth_required():
+        return {"ok": True}
+    if not hmac.compare_digest(password, config.ACCESS_PASSWORD):
+        raise HTTPException(status_code=401, detail="密码错误")
+    response.set_cookie(
+        AUTH_COOKIE, _expected_token(),
+        httponly=True, samesite="lax", max_age=7 * 24 * 3600,
+    )
+    return {"ok": True}
+
+
+@app.post("/api/logout")
+def logout(response: Response):
+    response.delete_cookie(AUTH_COOKIE)
+    return {"ok": True}
+
+
 @app.get("/kb/image")
-def kb_image(path: str) -> FileResponse:
+def kb_image(path: str, _: None = Depends(require_auth)) -> FileResponse:
     # prevent path traversal: resolve and ensure inside KB_DIR
     target = (config.KB_DIR / path).resolve()
     if not str(target).startswith(str(config.KB_DIR.resolve())) or not target.exists():
@@ -82,7 +130,8 @@ def _retrieve(question: str):
 
 
 @app.post("/api/ask")
-async def ask(question: str = Form(...), images: list[UploadFile] = File(default=[])):
+async def ask(question: str = Form(...), images: list[UploadFile] = File(default=[]),
+              _: None = Depends(require_auth)):
     if not question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
 
@@ -110,7 +159,8 @@ async def ask(question: str = Form(...), images: list[UploadFile] = File(default
 
 
 @app.post("/api/ask/stream")
-async def ask_stream(question: str = Form(...), images: list[UploadFile] = File(default=[])):
+async def ask_stream(question: str = Form(...), images: list[UploadFile] = File(default=[]),
+                     _: None = Depends(require_auth)):
     if not question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
 
@@ -167,6 +217,7 @@ async def learn(
     text: str = Form(...),
     title: str = Form(default=""),
     images: list[UploadFile] = File(default=[]),
+    _: None = Depends(require_auth),
 ):
     if not text.strip():
         raise HTTPException(status_code=400, detail="内容不能为空")
@@ -183,7 +234,7 @@ async def learn(
 
 
 @app.get("/api/stats")
-def stats():
+def stats(_: None = Depends(require_auth)):
     r = get_retriever()
     learned = sum(1 for d in r.docs if d.source == "learned")
     return {"total_docs": len(r.docs), "learned": learned, "model": config.VL_MODEL}

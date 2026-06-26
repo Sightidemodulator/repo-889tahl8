@@ -12,9 +12,44 @@ $$(".tab").forEach((t) => {
 });
 
 // ---- stats ----
-fetch("/api/stats").then((r) => r.json()).then((s) => {
-  $("#stats").innerHTML = `知识库 ${s.total_docs} 条<br>已学习补充 ${s.learned} 条 · ${s.model}`;
-}).catch(() => {});
+function refreshStats() {
+  fetch("/api/stats")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => {
+      if (s) $("#stats").innerHTML = `知识库 ${s.total_docs} 条<br>已学习补充 ${s.learned} 条 · ${s.model}`;
+    })
+    .catch(() => {});
+}
+
+// ---- access password gate ----
+function showGate() {
+  const gate = $("#gate"), input = $("#gate-input"), btn = $("#gate-btn"), err = $("#gate-err");
+  gate.hidden = false;
+  setTimeout(() => input.focus(), 50);
+  async function submit() {
+    if (!input.value) return;
+    err.textContent = "";
+    btn.disabled = true;
+    const fd = new FormData();
+    fd.append("password", input.value);
+    try {
+      const res = await fetch("/api/login", { method: "POST", body: fd });
+      if (res.ok) { gate.hidden = true; refreshStats(); }
+      else { err.textContent = "密码错误，请重试"; input.value = ""; input.focus(); }
+    } catch (e) {
+      err.textContent = "登录失败：" + e;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  btn.onclick = submit;
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } });
+}
+
+fetch("/api/auth")
+  .then((r) => r.json())
+  .then((a) => { if (a.required && !a.authed) showGate(); else refreshStats(); })
+  .catch(() => refreshStats());
 
 // ---- file selection state ----
 function makeFilePicker(inputSel, thumbsSel) {
@@ -32,7 +67,11 @@ function makeFilePicker(inputSel, thumbsSel) {
     });
   }
   input.onchange = () => { files = files.concat([...input.files]); input.value = ""; render(); };
-  return { get: () => files, clear: () => { files = []; render(); } };
+  return {
+    get: () => files,
+    add: (f) => { files.push(f); render(); },
+    clear: () => { files = []; render(); },
+  };
 }
 const askFiles = makeFilePicker("#ask-files", "#ask-thumbs");
 const learnFiles = makeFilePicker("#learn-files", "#learn-thumbs");
@@ -185,7 +224,7 @@ async function sendAsk() {
   input.value = ""; input.style.height = "auto";
   const fd = new FormData();
   fd.append("question", q);
-  files.forEach(f => fd.append("images", f));
+  files.forEach(f => fd.append("images", f, f.name || "image.png"));
   askFiles.clear();
   $("#ask-send").disabled = true;
   const ctrl = addStreamingAI();
@@ -203,6 +242,23 @@ $("#ask-input").addEventListener("keydown", (e) => {
 });
 $("#ask-input").addEventListener("input", function () {
   this.style.height = "auto"; this.style.height = Math.min(this.scrollHeight, 180) + "px";
+});
+// paste images directly into the chat box (Ctrl+V / 截图粘贴)
+$("#ask-input").addEventListener("paste", (e) => {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  let added = false;
+  for (const it of items) {
+    if (it.kind === "file" && it.type.startsWith("image/")) {
+      const blob = it.getAsFile();
+      if (blob) {
+        const ext = (blob.type.split("/")[1] || "png").replace("jpeg", "jpg");
+        const file = new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
+        askFiles.add(file);
+        added = true;
+      }
+    }
+  }
+  if (added) e.preventDefault();
 });
 $$(".chip").forEach(c => c.onclick = () => { $("#ask-input").value = c.textContent; sendAsk(); });
 

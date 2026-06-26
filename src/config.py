@@ -23,6 +23,10 @@ DASHSCOPE_BASE_URL = os.environ.get(
 )
 VL_MODEL = os.environ.get("VL_MODEL", "qwen-vl-max")
 
+# Access password gate. If empty, the web UI is open (no login required).
+# Set ACCESS_PASSWORD in the environment / .env to require a password.
+ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "")
+
 # Retrieval / generation knobs
 TOP_K = int(os.environ.get("TOP_K", "6"))
 MAX_CONTEXT_IMAGES = int(os.environ.get("MAX_CONTEXT_IMAGES", "6"))
