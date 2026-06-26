@@ -1,0 +1,10 @@
+.git
+data
+__pycache__
+**/__pycache__
+*.pyc
+test-plan*.md
+test-report*.md
+screencasts
+*.mp4
+*.webp
