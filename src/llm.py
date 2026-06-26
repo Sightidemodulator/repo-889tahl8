@@ -43,15 +43,13 @@ def _client() -> OpenAI:
     return OpenAI(api_key=config.DASHSCOPE_API_KEY, base_url=config.DASHSCOPE_BASE_URL)
 
 
-def answer(
+def _build_content(
     question: str,
     contexts: list,
-    user_image_paths: list[str] | None = None,
-    weak_retrieval: bool = False,
-) -> str:
-    """contexts: list of dicts {title, text, images(list of abs paths)}."""
-    client = _client()
-
+    user_image_paths: list[str] | None,
+    weak_retrieval: bool,
+) -> tuple[list[dict], int]:
+    """Assemble the multimodal user message. Returns (content, n_context_images)."""
     content: list[dict] = []
 
     # User-uploaded images first
@@ -85,6 +83,18 @@ def answer(
     if weak_retrieval:
         q_text += LOW_RELEVANCE_NOTE
     content.append({"type": "text", "text": q_text})
+    return content, n_imgs
+
+
+def answer(
+    question: str,
+    contexts: list,
+    user_image_paths: list[str] | None = None,
+    weak_retrieval: bool = False,
+) -> str:
+    """contexts: list of dicts {title, text, images(list of abs paths)}."""
+    client = _client()
+    content, _ = _build_content(question, contexts, user_image_paths, weak_retrieval)
 
     resp = client.chat.completions.create(
         model=config.VL_MODEL,
@@ -95,3 +105,34 @@ def answer(
         temperature=0.2,
     )
     return resp.choices[0].message.content or ""
+
+
+def answer_stream(
+    question: str,
+    contexts: list,
+    user_image_paths: list[str] | None = None,
+    weak_retrieval: bool = False,
+):
+    """Stream the answer. Yields (kind, text) tuples where kind is one of
+    'reasoning' (model thinking, if exposed) or 'answer' (final answer delta)."""
+    client = _client()
+    content, _ = _build_content(question, contexts, user_image_paths, weak_retrieval)
+
+    stream = client.chat.completions.create(
+        model=config.VL_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": content},
+        ],
+        temperature=0.2,
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        reasoning = getattr(delta, "reasoning_content", None)
+        if reasoning:
+            yield ("reasoning", reasoning)
+        if delta.content:
+            yield ("answer", delta.content)

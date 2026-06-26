@@ -178,6 +178,52 @@ html, body {
 .dot:nth-child(2){ animation-delay:.2s } .dot:nth-child(3){ animation-delay:.4s }
 @keyframes blink { 0%,100%{opacity:.2} 50%{opacity:1} }
 
+/* thinking panel */
+.think {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.think[open] { padding-bottom: 12px; }
+.think summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.think summary::-webkit-details-marker { display: none; }
+.think .steps { list-style: none; padding: 0; margin: 10px 0 0; }
+.think .steps li {
+  position: relative;
+  padding: 3px 0 3px 18px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.think .steps li::before {
+  content: ""; position: absolute; left: 2px; top: 11px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent-soft);
+}
+.think .steps li:last-child { color: var(--text); }
+.think .reasoning {
+  white-space: pre-wrap; color: var(--muted); margin-top: 8px;
+  font-size: 12.5px; line-height: 1.55;
+  border-left: 2px solid var(--border); padding-left: 10px;
+}
+.think .reasoning:empty { display: none; }
+.spin {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent-soft);
+  display: inline-block; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.answer:empty { display: none; }
+.answer > *:first-child { margin-top: 0; }
+
 /* lightbox */
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.85);
   display: none; align-items: center; justify-content: center; z-index: 50; }

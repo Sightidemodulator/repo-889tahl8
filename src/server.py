@@ -1,12 +1,13 @@
 """FastAPI backend + static frontend for the annotation Q&A assistant."""
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -61,14 +62,8 @@ def kb_image(path: str) -> FileResponse:
     return FileResponse(target)
 
 
-@app.post("/api/ask")
-async def ask(question: str = Form(...), images: list[UploadFile] = File(default=[])):
-    if not question.strip():
-        raise HTTPException(status_code=400, detail="问题不能为空")
-
-    user_imgs_rel = _save_uploads(images, "ask")
-    user_imgs_abs = [str(config.KB_DIR / p) for p in user_imgs_rel]
-
+def _retrieve(question: str):
+    """Run retrieval, build llm contexts + citations + gallery payloads."""
     hits = get_retriever().search(question)
     best = hits[0][1] if hits else 0.0
     weak = best < config.MIN_RELEVANCE
@@ -83,6 +78,18 @@ async def ask(question: str = Form(...), images: list[UploadFile] = File(default
         for rel in doc.images:
             if (config.KB_DIR / rel).exists():
                 gallery.append({"url": _img_url(rel), "caption": doc.title})
+    return contexts, citations, gallery[: config.MAX_CONTEXT_IMAGES], best, weak
+
+
+@app.post("/api/ask")
+async def ask(question: str = Form(...), images: list[UploadFile] = File(default=[])):
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    user_imgs_rel = _save_uploads(images, "ask")
+    user_imgs_abs = [str(config.KB_DIR / p) for p in user_imgs_rel]
+
+    contexts, citations, gallery, best, weak = _retrieve(question)
 
     try:
         ans = llm.answer(question, contexts, user_imgs_abs, weak_retrieval=weak)
@@ -97,8 +104,61 @@ async def ask(question: str = Form(...), images: list[UploadFile] = File(default
         "weak": weak,
         "best_score": round(best, 3),
         "citations": citations,
-        "images": gallery[: config.MAX_CONTEXT_IMAGES],
+        "images": gallery,
         "user_images": [_img_url(p) for p in user_imgs_rel],
+    })
+
+
+@app.post("/api/ask/stream")
+async def ask_stream(question: str = Form(...), images: list[UploadFile] = File(default=[])):
+    if not question.strip():
+        raise HTTPException(status_code=400, detail="问题不能为空")
+
+    user_imgs_rel = _save_uploads(images, "ask")
+    user_imgs_abs = [str(config.KB_DIR / p) for p in user_imgs_rel]
+
+    def sse(event: str, payload: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    def gen():
+        yield sse("step", {"text": "正在检索知识库（规则文档 + 答疑表）…"})
+        contexts, citations, gallery, best, weak = _retrieve(question)
+        n_imgs = len(gallery)
+        yield sse("step", {
+            "text": f"检索到 {len(citations)} 条相关资料，正在查看 {n_imgs} 张示例图片…"
+        })
+        if user_imgs_abs:
+            yield sse("step", {"text": f"正在结合你上传的 {len(user_imgs_abs)} 张图片进行对比…"})
+        if weak:
+            yield sse("step", {"text": f"⚠ 最高相关度仅 {round(best, 3)}，资料可能不足，将如实告知。"})
+        # send metadata up front so the UI can render badge/citations/gallery
+        yield sse("meta", {
+            "weak": weak,
+            "best_score": round(best, 3),
+            "citations": citations,
+            "images": gallery,
+            "user_images": [_img_url(p) for p in user_imgs_rel],
+        })
+        yield sse("step", {"text": "正在结合规则与图片推理并生成回答…"})
+        try:
+            started = False
+            for kind, text in llm.answer_stream(
+                question, contexts, user_imgs_abs, weak_retrieval=weak
+            ):
+                if kind == "reasoning":
+                    yield sse("reasoning", {"text": text})
+                else:
+                    if not started:
+                        started = True
+                        yield sse("answer_start", {})
+                    yield sse("delta", {"text": text})
+            yield sse("done", {})
+        except Exception as e:  # noqa: BLE001
+            yield sse("error", {"message": str(e)})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
     })
 
 

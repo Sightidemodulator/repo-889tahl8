@@ -53,46 +53,125 @@ function addUser(text, imgUrls) {
   chat.scrollTop = chat.scrollHeight;
 }
 
-function addTyping() {
-  const el = document.createElement("div");
-  el.className = "msg ai"; el.id = "typing";
-  el.innerHTML = `<div class="role">助手</div><div class="bubble typing">正在查阅文档与图片<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div>`;
-  chat.appendChild(el);
-  chat.scrollTop = chat.scrollHeight;
-}
-
-function addAI(data) {
-  const t = $("#typing"); if (t) t.remove();
+// ---- streaming AI message ----
+// Returns a controller with methods the SSE loop calls as events arrive.
+function addStreamingAI() {
+  clearHint();
   const el = document.createElement("div");
   el.className = "msg ai";
-  let body = "";
-  if (data.error) {
-    body = `<div class="badge-warn">调用模型出错</div><p>${escapeHtml(data.error)}</p>
-      <p class="hint">请检查 DASHSCOPE_API_KEY 是否有效。下面是检索到的相关资料图片。</p>`;
-  } else {
-    if (data.weak)
-      body += `<div class="badge-warn">⚠ 资料相关度较低（${data.best_score}），回答可能不确定</div>`;
-    body += marked.parse(data.answer || "");
-  }
-  // citations
-  if (data.citations && data.citations.length) {
-    const items = data.citations.map(c => `<li>${escapeHtml(c.title)} <span style="opacity:.6">(${c.score})</span></li>`).join("");
-    body += `<details class="citations"><summary>参考来源 ${data.citations.length} 条</summary><ul>${items}</ul></details>`;
-  }
-  // gallery
-  if (data.images && data.images.length) {
-    const figs = data.images.map(im =>
-      `<figure><img src="${im.url}" data-full="${im.url}"><figcaption>${escapeHtml(im.caption)}</figcaption></figure>`).join("");
-    body += `<div class="gallery">${figs}</div>`;
-  }
-  el.innerHTML = `<div class="role">助手</div><div class="bubble">${body}</div>`;
+  el.innerHTML = `
+    <div class="role">助手</div>
+    <div class="bubble">
+      <details class="think" open>
+        <summary><span class="spin"></span><span class="think-label">思考中…</span></summary>
+        <div class="think-body"><ul class="steps"></ul><div class="reasoning"></div></div>
+      </details>
+      <div class="answer"></div>
+      <div class="extras"></div>
+    </div>`;
   chat.appendChild(el);
-  bindLightbox(el);
   chat.scrollTop = chat.scrollHeight;
+
+  const think = el.querySelector(".think");
+  const thinkLabel = el.querySelector(".think-label");
+  const steps = el.querySelector(".steps");
+  const reasoning = el.querySelector(".reasoning");
+  const answer = el.querySelector(".answer");
+  const extras = el.querySelector(".extras");
+  let answerRaw = "", reasoningRaw = "";
+  const t0 = Date.now();
+
+  function scroll() { chat.scrollTop = chat.scrollHeight; }
+
+  return {
+    step(text) {
+      const li = document.createElement("li");
+      li.textContent = text;
+      steps.appendChild(li);
+      scroll();
+    },
+    reasoning(text) {
+      reasoningRaw += text;
+      reasoning.textContent = reasoningRaw;
+      scroll();
+    },
+    meta(data) {
+      if (data.weak)
+        answer.insertAdjacentHTML("beforebegin",
+          `<div class="badge-warn">⚠ 资料相关度较低（${data.best_score}），回答可能不确定</div>`);
+      // build citations + gallery now, append after streaming finishes
+      let ex = "";
+      if (data.citations && data.citations.length) {
+        const items = data.citations.map(c =>
+          `<li>${escapeHtml(c.title)} <span style="opacity:.6">(${c.score})</span></li>`).join("");
+        ex += `<details class="citations"><summary>参考来源 ${data.citations.length} 条</summary><ul>${items}</ul></details>`;
+      }
+      if (data.images && data.images.length) {
+        const figs = data.images.map(im =>
+          `<figure><img src="${im.url}" data-full="${im.url}"><figcaption>${escapeHtml(im.caption)}</figcaption></figure>`).join("");
+        ex += `<div class="gallery">${figs}</div>`;
+      }
+      extras.dataset.html = ex;
+    },
+    answerStart() {
+      think.removeAttribute("open");
+    },
+    delta(text) {
+      answerRaw += text;
+      answer.innerHTML = marked.parse(answerRaw);
+      scroll();
+    },
+    done() {
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      thinkLabel.textContent = `思考过程（用时 ${secs}s）`;
+      think.querySelector(".spin").remove();
+      think.removeAttribute("open");
+      if (extras.dataset.html) { extras.innerHTML = extras.dataset.html; bindLightbox(extras); }
+      scroll();
+    },
+    error(msg) {
+      think.removeAttribute("open");
+      answer.innerHTML = `<div class="badge-warn">调用模型出错</div><p>${escapeHtml(msg)}</p>
+        <p class="hint">请检查 DASHSCOPE_API_KEY 是否有效。</p>`;
+      if (extras.dataset.html) { extras.innerHTML = extras.dataset.html; bindLightbox(extras); }
+      scroll();
+    },
+  };
 }
 
 function escapeHtml(s) {
   return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---- SSE stream parser over fetch body ----
+async function streamSSE(url, fd, ctrl) {
+  const res = await fetch(url, { method: "POST", body: fd });
+  if (!res.ok || !res.body) { ctrl.error(`HTTP ${res.status}`); return; }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const raw = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      let event = "message", data = "";
+      raw.split("\n").forEach(line => {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) data += line.slice(5).trim();
+      });
+      let payload = {}; try { payload = data ? JSON.parse(data) : {}; } catch (_) {}
+      if (event === "step") ctrl.step(payload.text);
+      else if (event === "reasoning") ctrl.reasoning(payload.text);
+      else if (event === "meta") ctrl.meta(payload);
+      else if (event === "answer_start") ctrl.answerStart();
+      else if (event === "delta") ctrl.delta(payload.text);
+      else if (event === "done") ctrl.done();
+      else if (event === "error") ctrl.error(payload.message);
+    }
+  }
 }
 
 // ---- ask ----
@@ -109,13 +188,11 @@ async function sendAsk() {
   files.forEach(f => fd.append("images", f));
   askFiles.clear();
   $("#ask-send").disabled = true;
-  addTyping();
+  const ctrl = addStreamingAI();
   try {
-    const res = await fetch("/api/ask", { method: "POST", body: fd });
-    const data = await res.json();
-    addAI(data);
+    await streamSSE("/api/ask/stream", fd, ctrl);
   } catch (e) {
-    addAI({ error: String(e) });
+    ctrl.error(String(e));
   } finally {
     $("#ask-send").disabled = false;
   }
