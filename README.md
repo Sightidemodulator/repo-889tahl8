@@ -51,6 +51,37 @@ export DASHSCOPE_API_KEY=sk-xxxx
 python3 src/server.py     # 打开 http://localhost:7860
 ```
 
+## Docker 部署
+镜像内置 CPU 版 torch + 烘焙好的嵌入模型，运行时**不需要访问 HuggingFace**；
+`data/` 与 `src/`、`web/` 以 bind-mount 挂入，改完代码 `docker compose restart` 即可生效，
+学习/上传内容持久化在宿主机 `data/` 下。
+
+```bash
+# 准备 .env（权限 600）
+printf 'DASHSCOPE_API_KEY=sk-xxxx\nDASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1\n' > .env && chmod 600 .env
+
+# 构建（公网默认源）
+docker build -t annotation-assistant:latest .
+
+# 国内/受限网络：用镜像源构建（清华 PyPI + 阿里云 torch wheel + hf-mirror + 清华 Debian 源）
+docker build \
+  --build-arg PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+  --build-arg TORCH_WHEEL=https://mirrors.aliyun.com/pytorch-wheels/cpu/torch-2.6.0%2Bcpu-cp311-cp311-linux_x86_64.whl \
+  --build-arg HF_ENDPOINT=https://hf-mirror.com \
+  --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+  -t annotation-assistant:latest .
+
+docker compose up -d            # 启动，监听 0.0.0.0:7860
+```
+
+调试常用命令：
+```bash
+docker logs -f annotation-assistant      # 跟随日志
+docker exec -it annotation-assistant bash # 进容器排查
+docker compose restart                    # 改 src/、web/ 后重启生效
+docker compose up -d --build              # 改依赖/Dockerfile 后重建
+```
+
 ## 配置（环境变量，见 `src/config.py`）
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
