@@ -1,0 +1,12 @@
+# Generated knowledge base & user data (regenerate via scripts/ingest_all.sh).
+# The source rules/Q&A docs are proprietary, so nothing under data/ is committed.
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets
+.env

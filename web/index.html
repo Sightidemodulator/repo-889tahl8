@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>标注答疑助手</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">◆</span>
+        <div>
+          <h1>标注答疑助手</h1>
+          <p class="sub">2D / 3D 混合标注 · 多模态 RAG · Qwen-VL</p>
+        </div>
+      </div>
+      <div class="stats" id="stats"></div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="ask">问答</button>
+      <button class="tab" data-tab="learn">学习 / 录入知识</button>
+    </nav>
+
+    <!-- ASK -->
+    <section class="panel active" id="panel-ask">
+      <div class="chat" id="chat">
+        <div class="empty-hint">
+          <p>向助手提问标注规则，可上传你正在标注的截图一起问。</p>
+          <div class="examples">
+            <button class="chip">重卡和挂车怎么区分？</button>
+            <button class="chip">遮挡超过80%的对向车道车辆要标吗？</button>
+            <button class="chip">三轮车有骑手时怎么标？</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="thumbs" id="ask-thumbs"></div>
+        <div class="composer-row">
+          <label class="attach" title="上传图片">
+            <input type="file" id="ask-files" accept="image/*" multiple hidden />
+            <span>📎</span>
+          </label>
+          <textarea id="ask-input" rows="1" placeholder="输入你的标注问题…（Enter 发送，Shift+Enter 换行）"></textarea>
+          <button class="send" id="ask-send">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- LEARN -->
+    <section class="panel" id="panel-learn">
+      <div class="learn-card">
+        <h2>录入新的答疑 / 注意点</h2>
+        <p class="hint">把新的规则补充、易错点、答疑结论写进知识库，提交后立即可被检索与引用。</p>
+        <label class="field-label">标题（可选）</label>
+        <input type="text" id="learn-title" placeholder="例：夜间无车灯车辆的截断判定" />
+        <label class="field-label">内容</label>
+        <textarea id="learn-text" rows="6" placeholder="描述规则 / 结论 / 注意点，越具体越好…"></textarea>
+        <label class="field-label">配图（可选，可多张）</label>
+        <label class="learn-attach">
+          <input type="file" id="learn-files" accept="image/*" multiple hidden />
+          <span>＋ 选择图片</span>
+        </label>
+        <div class="thumbs" id="learn-thumbs"></div>
+        <button class="send wide" id="learn-send">写入知识库</button>
+        <div class="learn-result" id="learn-result"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
